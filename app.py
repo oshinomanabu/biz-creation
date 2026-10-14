@@ -33,7 +33,9 @@ with right_col:
                 try:
                     # サーバーサイドの強固なPython通信ネットワークを使用するため、GASのような容量制限（4MBの壁）やCORSエラーは100%絶対に発生しません
                     client = genai.Client(api_key=user_api_key)
-                    ext = os.path.splitext(uploaded_file.name).lower()
+                    # ◯ 修正後（正しい拡張子の取得方法に調律しました）
+　　　　　　　　　　　　ext = os.path.splitext(uploaded_file.name)[1].lower()
+
                     temp_filename = f"temp_audio{ext}"
                     with open(temp_filename, "wb") as f:
                         f.write(uploaded_file.getbuffer())
