@@ -5,29 +5,33 @@ from google import genai
 
 st.set_page_config(page_title="光文社ビジネスクリエーション部", layout="wide")
 
-# セキュリティ認証の入力欄を画面から1文字残さず完全にパージしました
 st.markdown("""
-<div style="background-color: #1E293B; padding: 20px; border-radius: 10px; margin-bottom: 25px;">
-    <h1 style="color: #F8FAFC; margin: 0; font-size: 28px;">🚀 光文社ビジネスクリエーション部・新事業創出システム</h1>
+<div style="background-color: #1E293B; padding: 25px; border-radius: 10px; margin-bottom: 25px; border: 1px solid #334155;">
+    <h1 style="color: #F8FAFC; margin: 0; font-size: 26px;">🚀 光文社ビジネスクリエーション部・新事業創出システム</h1>
     <p style="color: #94A3B8; margin-top: 5px; margin-bottom: 0; font-size: 14px;">
-        1時間以上の長大な会議音声にも対応。お気持ちの呪縛やコンサルの綺麗事を焼き尽くし、冷徹な議事録と尖った新事業の思想をサルベージします。
+        1時間以上の長大音声対応。お気持ちの呪縛を焼き尽くし、冷徹な議事録と尖った新事業の思想をサルベージします。
     </p>
 </div>
 """, unsafe_allow_html=True)
 
 st.markdown("### 🛠️ 音声ファイルのドロップ")
-uploaded_file = st.file_uploader("会議の録音ファイル（音声）をここにドラッグ＆ドロップしてください", type=["mp3", "m4a", "wav"])
+uploaded_file = st.file_uploader("会議の録音ファイル（音声）をここにドラッグ＆ドロップしてください", type=["mp3", "m4a", "wav"], label_visibility="collapsed")
+
+# 画面間で編集中のテキストを完全に記憶（保持）し続けるための、Streamlitの強固なメモリ格納庫（セッション状態）の構築
+if "edited_output" not in st.session_state:
+    st.session_state.edited_output = ""
 
 if uploaded_file:
-    if st.button("議事録・企画案の自動生成を開始（完了時にTXTが自動発行されます）", type="primary", use_container_width=True):
+    st.markdown(f"**🟢 検知:** `{uploaded_file.name}` ({uploaded_file.size/1024/1024:.2f} MB)")
+    
+    if st.button("議事録・企画案の自動生成を開始", type="primary", use_container_width=True):
         status_placeholder = st.empty()
         status_placeholder.markdown("⏳ **大容量音声を転送しながら、Geminiで冷徹に解析中... (1〜3分かかります)**")
         
         try:
-            # 先ほど暗号金庫に隠した APIキー をシステムが裏側で自動的に読み込みます
             api_key = os.environ.get("GEMINI_API_KEY")
             if not api_key:
-                st.error("GitHubのSettingsでGEMINI_API_KEYが登録されていません。")
+                st.error("認証エラー: GEMINI_API_KEYが登録されていません。")
                 st.stop()
                 
             client = genai.Client(api_key=api_key)
@@ -49,7 +53,7 @@ if uploaded_file:
             添付された音声内容を構造的に分析し、お気持ちの一般論や綺麗事を1文字残さず焼き尽くした【議事録】と、出版社としてのプライドを持った【尖った新事業の企画ドラフト案2つ】を出力してください。
 
             ■ 前提条件：
-            ・現在の出版業界は非常に厳しい。既存の「紙」や、失敗に終わった消耗戦のコタツ記事デジタルから完全に脱脱却する。
+            ・現在の出版業界は非常に厳しい。既存の「紙」や、失敗に終わった消耗戦のコタツ記事デジタルから完全に脱却する。
             ・紙、デジタルにとらわれず、イベント、スクールビジネス、終活ビジネス等々の「光文社が手がけなかった」業務を生み出す。
             ・既存雑誌・書籍と一切関係ないK-POP関係の出版物、グッズ販売、イベント等を行ってきた。
             ・フィジカルか、AIか、動画か、SNSかを問わず、新たなビジネスイメージを作りたい。
@@ -69,27 +73,35 @@ if uploaded_file:
             """
             
             response = client.models.generate_content(model='gemini-3.8-flash', contents=[audio_file_ref, prompt])
-            output_text = response.text
             
-            status_placeholder.markdown("### ✅ 解析完了（実利確定）")
-            
-            # 左右に並べるのを完全に廃止し、画面最上部に巨大な緑色の「TXTダウンロードボタン」を一撃出現させます
-            st.download_button(
-                label="📥 成果物(TXT)をダウンロードする",
-                data=output_text,
-                file_name="光文社ビジクリ部_議事録_企画案.txt",
-                mime="text/plain",
-                type="secondary",
-                use_container_width=True
-            )
-            
-            # テキストの内容もその下にシンプルに確認用に表示します
-            st.text_area("内容の簡易プレビュー", value=output_text, height=500)
+            # 生成されたテキストを、その場で編集可能なメモリ格納庫へ同期
+            st.session_state.edited_output = response.text
+            status_placeholder.empty()
+            st.success("✅ 解析完了。以下のテキストボックス内で自由に編集・精査が可能です。")
             
             client.files.delete(name=audio_file_ref.name)
             os.remove(temp_filename)
         except Exception as e:
             status_placeholder.empty()
             st.error(f"エラーが発生しました: {e}")
-else:
-    st.warning("音声ファイルをドラッグ＆ドロップしてください。")
+
+# テキストが生成されている場合、画面に「生きた編集・ダウンロードエリア」を解放
+if st.session_state.edited_output:
+    st.markdown("### 🎯 成果物の精査・自由編集エリア")
+    
+    # 押野さんが自由にキーボードで文字を足し、削り、書き換えることができる本物のエディターボックス
+    st.session_state.edited_output = st.text_area(
+        label="生成されたテキスト（自由に編集・上書きしてください）",
+        value=st.session_state.edited_output,
+        height=600,
+        label_visibility="collapsed"
+    )
+    
+    # 手直しし終わった「現在のテキスト」をそのまま丸ごとTXTファイルとしてMacへ一撃ダウンロード
+    st.download_button(
+        label="📥 編集完了した成果物(TXT)をダウンロードする",
+        data=st.session_state.edited_output,
+        file_name="光文社ビジクリ部_確定議事録_企画案.txt",
+        mime="text/plain",
+        use_container_width=True
+    )
