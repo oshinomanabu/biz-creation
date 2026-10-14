@@ -2,7 +2,6 @@ import streamlit as st
 import os, time
 from google import genai
 
-# 画面の全体設定（大容量ファイルを左右に分割して最も見やすく調整）
 st.set_page_config(page_title="光文社ビジネスクリエーション部", layout="wide")
 
 st.markdown("""
@@ -14,7 +13,6 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# 画面の左側に「APIキー入力欄」と「音声アップロード」を美しく配置
 left_col, right_col = st.columns(2, gap="large")
 
 with left_col:
@@ -31,11 +29,8 @@ with right_col:
         if left_col.button("議事録・企画案の自動生成を開始", type="primary", use_container_width=True):
             with st.spinner("大容量音声をクラウド間で安全にストリーム転送し、Gemini 1.5 Proで冷徹に解析中..."):
                 try:
-                    # サーバーサイドの強固なPython通信ネットワークを使用するため、GASのような容量制限（4MBの壁）やCORSエラーは100%絶対に発生しません
                     client = genai.Client(api_key=user_api_key)
-                    # ◯ 修正後（正しい拡張子の取得方法に調律しました）
-　　　　　　　　　　　　ext = os.path.splitext(uploaded_file.name)[1].lower()
-
+                    ext = os.path.splitext(uploaded_file.name)[1].lower()
                     temp_filename = f"temp_audio{ext}"
                     with open(temp_filename, "wb") as f:
                         f.write(uploaded_file.getbuffer())
@@ -64,7 +59,7 @@ with right_col:
 
                     ■ 企画におけるNG：
                     ・コンサル的な「お行儀の良い一般論」「誰でも言える綺麗事（絆、おもてなし）」。
-                    ・予算を無駄に食う割に、現場を動かせないハコモノ的な大裟な提案。
+                    ・予算を無駄に食う割に、現場を動かせないハコモノ的な大袈裟な提案。
 
                     以下のフォーマットを厳格に守って出力すること：
                     ■ 1. 冷徹な議事録（決定事項・争点・Next Actions）
