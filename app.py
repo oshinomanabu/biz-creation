@@ -31,7 +31,7 @@ with right_col:
             with st.spinner("大容量音声をクラウド間で安全にストリーム転送し、Gemini 1.5 Proで冷徹に解析中..."):
                 try:
                     client = genai.Client(api_key=user_api_key)
-                    ext = os.path.splitext(uploaded_file.name)[1].lower()
+                    ext = os.path.splitext(uploaded_file.name).lower()
                     temp_filename = f"temp_audio{ext}"
                     with open(temp_filename, "wb") as f:
                         f.write(uploaded_file.getbuffer())
@@ -60,7 +60,7 @@ with right_col:
 
                     ■ 企画におけるNG：
                     ・コンサル的な「お行儀の良い一般論」「誰でも言える綺麗事（絆、おもてなし）」。
-                    ・予算を無駄に食う割に、現場を動かせないハコモノ的な大袈裟な提案。
+                    ・予算を無駄に食う割に、現場を動かせないハコモノ的な大裟な提案。
 
                     以下のフォーマットを厳格に守って出力すること：
                     ■ 1. 冷徹な議事録（決定事項・争点・Next Actions）
@@ -68,7 +68,8 @@ with right_col:
                     ■ 3. 企画案B（同上）
                     """
                     
-                    response = client.models.generate_content(model='models/gemini-1.5-pro', contents=[audio_file_ref, prompt])
+                    # 最新SDK（google-genai）の正規のエンドポイント呼び出しに完全調律しました
+                    response = client.models.generate_content(model='gemini-1.5-pro', contents=[audio_file_ref, prompt])
                     output_text = response.text
                     
                     st.markdown(output_text)
