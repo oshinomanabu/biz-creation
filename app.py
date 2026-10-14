@@ -5,7 +5,7 @@ from google import genai
 
 st.set_page_config(page_title="光文社ビジネスクリエーション部", layout="wide")
 
-# サイトの文言をブラウザ上で記憶し続けるための格納庫の構築
+# サイトの初期文言をメモリ格納庫に安全にロック
 if "site_title" not in st.session_state:
     st.session_state.site_title = "光文社ビジネスクリエーション部・新事業創出システム"
 if "site_desc" not in st.session_state:
@@ -17,26 +17,30 @@ if "prompt_target" not in st.session_state:
 if "prompt_ng" not in st.session_state:
     st.session_state.prompt_ng = "・コンサル的な「お行儀の良い一般論」「誰でも言える綺麗事（絆、おもてなし）」。\n・予算を無駄に食う割に、現場を動かせないハコモノ的な大袈裟な提案。"
 
-# --- 【左側：サイト設定・文言の編集エリア】 ---
-# --- 【右側：実務・音声のドロップエリア】 ---
-left_col, right_col = st.columns(2, gap="large")
+# 左右の2分割画面を完全に制御
+left_col, right_col = st.columns([1, 2], gap="large")
 
 with left_col:
-    st.markdown("### 📝 サイトの文言・前提条件の自由編集")
+    st.markdown("### 🔒 管理者ログイン")
+    # 一般ユーザーの目から入力欄を完全に保護するためのパスワード防壁
+    admin_password = st.text_input("暗証番号を入力してください", type="password", help="正しい暗証番号を入力すると、サイトの文言編集パネルが解放されます。")
     
-    # サイトのタイトルや文言そのものを、あなたが画面上で自由に打ち替えられるボックス
-    st.session_state.site_title = st.text_input("⚙️ システムのメインタイトル", value=st.session_state.site_title)
-    st.session_state.site_desc = st.text_area("⚙️ システムの説明文", value=st.session_state.site_desc, height=70)
-    
-    st.markdown("---")
-    st.markdown("### 🎯 AIに叩き込む生存戦略（プロンプト文脈）の調律")
-    # AIの脳みそを調律する前提条件そのものを、いつでも自由に変更・追加・削除できます
-    st.session_state.prompt_pre = st.text_area("■ 前提条件（戦略の方程式）", value=st.session_state.prompt_pre, height=180)
-    st.session_state.prompt_target = st.text_area("■ 狙うべきターゲット層", value=st.session_state.prompt_target, height=100)
-    st.session_state.prompt_ng = st.text_area("■ 排除すべきNG項目", value=st.session_state.prompt_ng, height=100)
+    # パスワードが一致した時（例：kobunsha2026）だけ、左半分に編集パネルを一撃出現させます
+    if admin_password == "kobunsha2026":
+        st.success("🔓 管理者認証に成功しました。")
+        st.markdown("### 📝 サイト文言・前提条件の自由編集")
+        st.session_state.site_title = st.text_input("⚙️ システムのメインタイトル", value=st.session_state.site_title)
+        st.session_state.site_desc = st.text_area("⚙️ システムの説明文", value=st.session_state.site_desc, height=70)
+        st.markdown("---")
+        st.markdown("### 🎯 戦略文脈（プロンプト）の書き換え")
+        st.session_state.prompt_pre = st.text_area("■ 前提条件", value=st.session_state.prompt_pre, height=180)
+        st.session_state.prompt_target = st.text_area("■ ターゲット層", value=st.session_state.prompt_target, height=100)
+        st.session_state.prompt_ng = st.text_area("■ 排除すべきNG項目", value=st.session_state.prompt_ng, height=100)
+    elif admin_password:
+        st.error("暗証番号が間違っています。")
 
 with right_col:
-    # あなたが左側で書き換えたタイトルと説明文が、リアルタイムにここに公式画面として美しく反映されます
+    # ユーザーが目にするオフィシャルなメイン画面
     st.markdown(f"""
     <div style="background-color: #1E293B; padding: 25px; border-radius: 10px; margin-bottom: 25px; border: 1px solid #334155;">
         <h1 style="color: #F8FAFC; margin: 0; font-size: 24px;">🚀 {st.session_state.site_title}</h1>
@@ -50,7 +54,7 @@ with right_col:
     if uploaded_file:
         st.markdown(f"**🟢 検知:** `{uploaded_file.name}` ({uploaded_file.size/1024/1024:.2f} MB)")
         
-        if st.button("書き換えた文言・条件で解析を開始する", type="primary", use_container_width=True):
+        if st.button("議事録・新事業企画案の自動生成を開始", type="primary", use_container_width=True):
             status_placeholder = st.empty()
             status_placeholder.markdown("⏳ **大容量音声を転送しながら、Geminiで冷徹に解析中... (1〜3分かかります)**")
             
@@ -74,7 +78,6 @@ with right_col:
                     time.sleep(5)
                     audio_file_ref = client.files.get(name=audio_file_ref.name)
                 
-                # あなたが左側の画面で書き換えた生きた文言そのものを、そのままプロンプトの骨組みとして合成します
                 prompt = f"""
                 あなたは光文社ビジネスクリエーション部のディレクターとして、高度な論理的知性を持って冷徹に会話を分析する専門家です。
                 添付された音声内容を構造的に分析し、お気持ちの一般論や綺麗事を1文字残さず焼き尽くした【議事録】と、出版社としてのプライドを持った【尖った新事業の企画ドラフト案2つ】を出力してください。
