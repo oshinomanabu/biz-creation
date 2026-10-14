@@ -28,10 +28,10 @@ with right_col:
     
     if uploaded_file and user_api_key:
         if left_col.button("議事録・企画案の自動生成を開始", type="primary", use_container_width=True):
-            with st.spinner("大容量音声をクラウド間で安全にストリーム転送し、Gemini 1.5 Proで冷徹に解析中..."):
+            with st.spinner("大容量音声をクラウド間で安全にストリーム転送し、Geminiで冷徹に解析中..."):
                 try:
                     client = genai.Client(api_key=user_api_key)
-                    ext = os.path.splitext(uploaded_file.name).lower()
+                    ext = os.path.splitext(uploaded_file.name)[1].lower()
                     temp_filename = f"temp_audio{ext}"
                     with open(temp_filename, "wb") as f:
                         f.write(uploaded_file.getbuffer())
@@ -50,7 +50,7 @@ with right_col:
 
                     ■ 前提条件：
                     ・現在の出版業界は非常に厳しい。既存の「紙」や、失敗に終わった消耗戦のコタツ記事デジタルから完全に脱却する。
-                    ・紙, デジタルにとらわれず、イベント、スクールビジネス、終活ビジネス等々の「光文社が手がけなかった」業務を生み出す。
+                    ・紙、デジタルにとらわれず、イベント、スクールビジネス、終活ビジネス等々の「光文社が手がけなかった」業務を生み出す。
                     ・既存雑誌・書籍と一切関係ないK-POP関係の出版物、グッズ販売、イベント等を行ってきた。
                     ・フィジカルか、AIか、動画か、SNSかを問わず、新たなビジネスイメージを作りたい。
                     ・ただし「出版社がやるビジネス」の矜持を死守。「ラーメン屋」「キャバクラ」は厳禁。海外の最新事例の構造も参照すること。
@@ -60,7 +60,7 @@ with right_col:
 
                     ■ 企画におけるNG：
                     ・コンサル的な「お行儀の良い一般論」「誰でも言える綺麗事（絆、おもてなし）」。
-                    ・予算を無駄に食う割に、現場を動かせないハコモノ的な大裟な提案。
+                    ・予算を無駄に食う割に、現場を動かせないハコモノ的な大袈裟な提案。
 
                     以下のフォーマットを厳格に守って出力すること：
                     ■ 1. 冷徹な議事録（決定事項・争点・Next Actions）
@@ -68,7 +68,7 @@ with right_col:
                     ■ 3. 企画案B（同上）
                     """
                     
-                    response = client.models.generate_content(model='gemini-1.5-pro', contents=[audio_file_ref, prompt])
+                    response = client.models.generate_content(model='gemini-2.5-flash', contents=[audio_file_ref, prompt])
                     output_text = response.text
                     
                     st.markdown(output_text)
