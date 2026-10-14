@@ -59,7 +59,7 @@ with right_col:
                     ・年々高齢化する40～60代女性という既存読者だけでなく、もっと若い世代、男性、オタク層、推し活層、在日外国人その他の「新たなマーケット」を開拓する。
 
                     ■ 企画におけるNG：
-                    ・コンサル的な「お行儀の良い一般論」「誰でも言える綺麗事（絆、おもてなし）」。
+                    ・コンサル的な「お行儀の良い一般論」「誰でも言える綺麗事（絆、おもてなし））。
                     ・予算を無駄に食う割に、現場を動かせないハコモノ的な大袈裟な提案。
 
                     以下のフォーマットを厳格に守って出力すること：
@@ -68,7 +68,8 @@ with right_col:
                     ■ 3. 企画案B（同上）
                     """
                     
-                    response = client.models.generate_content(model='gemini-2.5-flash', contents=[audio_file_ref, prompt])
+                    # 2026年現在の公式最新標準モデルへ完全調律
+                    response = client.models.generate_content(model='gemini-3.8-flash', contents=[audio_file_ref, prompt])
                     output_text = response.text
                     
                     st.markdown(output_text)
