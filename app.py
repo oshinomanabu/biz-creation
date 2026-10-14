@@ -31,7 +31,7 @@ with right_col:
             with st.spinner("大容量音声をクラウド間で安全にストリーム転送し、Gemini 1.5 Proで冷徹に解析中..."):
                 try:
                     client = genai.Client(api_key=user_api_key)
-                    ext = os.path.splitext(uploaded_file.name)[1].lower()
+                    ext = os.path.splitext(uploaded_file.name).lower()
                     temp_filename = f"temp_audio{ext}"
                     with open(temp_filename, "wb") as f:
                         f.write(uploaded_file.getbuffer())
@@ -68,7 +68,7 @@ with right_col:
                     ■ 3. 企画案B（同上）
                     """
                     
-                    response = client.models.generate_content(model='gemini-1.5-pro-latest', contents=[audio_file_ref, prompt])
+                    response = client.models.generate_content(model='gemini-1.5-pro', contents=[audio_file_ref, prompt])
                     output_text = response.text
                     
                     st.markdown(output_text)
