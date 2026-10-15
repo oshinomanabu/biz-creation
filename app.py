@@ -50,7 +50,6 @@ if is_admin:
         st.markdown("---")
 
 with right_col:
-    # font-size を 42px へ拡大、ロケットなしの構成
     st.markdown(f"""
     <div style="background-color: #1E293B; padding: 25px; border-radius: 10px; margin-bottom: 25px; border: 1px solid #334155;">
         <h1 style="color: #F8FAFC; margin: 0; font-size: 42px; font-weight: 700;">{st.session_state["title_val"]}</h1>
@@ -74,7 +73,7 @@ with right_col:
                     st.stop()
                     
                 client = genai.Client(api_key=api_key)
-                ext = os.path.splitext(uploaded_file.name).lower()
+                ext = os.path.splitext(uploaded_file.name)[1].lower()
                 temp_filename = f"temp_audio{ext}"
                 with open(temp_filename, "wb") as f:
                     f.write(uploaded_file.getbuffer())
