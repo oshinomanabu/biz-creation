@@ -10,7 +10,7 @@ is_admin = False
 if "admin" in query_params:
     param_val = query_params["admin"]
     if isinstance(param_val, list):
-        is_admin = len(param_val) > 0 and param_val == "true"
+        is_admin = len(param_val) > 0 and param_val[0] == "true"
     else:
         is_admin = param_val == "true"
 
@@ -19,11 +19,11 @@ if "title_val" not in st.session_state:
 if "desc_val" not in st.session_state:
     st.session_state["desc_val"] = "1時間以上の長大な会議音声にも対応。会議や打ち合わせの議事録と新事業の企画案ドラフトを出力します。"
 if "pre_val" not in st.session_state:
-    st.session_state["pre_val"] = "・現在の出版業界は非常に厳しい。既存の「紙」や、失敗に終わった消耗戦のコタツ記事デジタルから完全に脱却する。\n・紙、デジタルにとらわれず、イベント、スクールビジネス、終活ビジネス等々の「光文社が手がけなかった」新規事業を生み出す。\n・既存雑誌・書籍と一切関係ないK-POP関係の出版物、グッズ販売、イベント等を行ってきた。\n・フィジカルか, AIか、動画か、SNSかを問わず、新たなビジネスイメージを作りたい。\n・もちろん、書籍やIPといった出版社の事業も大切。\n・ただし「出版社がやるビジネス」のイメージを守る。ラーメン屋やキャバクラを経営してどうする？\n・海外の最新事例の構造も参照すること。"
+    st.session_state["pre_val"] = "・現在の出版業界は非常に厳しい。既存の「紙」や、失敗に終わった消耗戦のコタツ記事デジタルから完全に脱却する。\n・紙、デジタルにとらわれず、イベント、スクールビジネス、終活ビジネス等々の「光文社が手がけなかった」新規事業を生み出す。\n・既存雑誌・書籍と一切関係ないK-POP関係の出版物、グッズ販売、イベント等を行ってきた。\n・フィジカルか、AIか、動画か、SNSかを問わず、新たなビジネスイメージを作りたい。\n・もちろん、書籍やIPといった出版社の事業も大切。\n・ただし「出版社がやるビジネス」のイメージを守る。ラーメン屋やキャバクラを経営してどうする？\n・海外の最新事例の構造も参照すること。"
 if "target_val" not in st.session_state:
-    st.session_state["target_val"] = "・年々高齢化する40～60代女性という光文社女性誌の既存読者だけでなく、もっと若い世代、男性、オタク層、推し活層、在日外国人その他の「新たなマーケット」を開拓する。"
+    st.session_state["target_val"] = "・年々高齢化する 40～60 代女性という光文社女性誌の既存読者だけでなく、もっと若い世代、男性、オタク層、推し活層、在日外国人その他の「新たなマーケット」を開拓する。"
 if "ng_val" not in st.session_state:
-    st.session_state["ng_val"] = "・コンサル的な「お行儀の良い一般論」「誰でも言える綺麗事（絆、おもてなし）」。\n・予算を無駄に食う割に、現場を動かせないハコモノ的な大裟な提案。"
+    st.session_state["ng_val"] = "・コンサル的な「お行儀の良い一般論」「誰でも言える綺麗事（絆、おもてなし）」。\n・予算を無駄に食う割に、現場を動かせないハコモノ的な大袈裟な提案。"
 
 def sync_title(): st.session_state["title_val"] = st.session_state["k1"]
 def sync_desc(): st.session_state["desc_val"] = st.session_state["k2"]
@@ -74,7 +74,6 @@ with right_col:
                     
                 client = genai.Client(api_key=api_key)
                 
-                # 構文のタイポを完全に修正
                 ext = os.path.splitext(uploaded_file.name)[1].lower()
                 temp_filename = f"temp_audio{ext}"
                 with open(temp_filename, "wb") as f:
@@ -107,6 +106,7 @@ with right_col:
                 ■ 3. 企画案B（同上）
                 """
                 
+                # 新しい google-genai SDK で 404 にならず、現在確実に機能する最新世代の標準モデル名に固定
                 response = client.models.generate_content(model='gemini-2.5-flash', contents=[audio_file_ref, prompt])
                 output_text = response.text
                 
