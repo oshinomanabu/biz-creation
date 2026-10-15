@@ -74,7 +74,7 @@ with right_col:
                     
                 client = genai.Client(api_key=api_key)
                 
-                # タプルエラーの真犯人であった「インデックス指定の漏れ」を厳密に修正（[1]を付与）
+                # タプルバグを回避する正規の拡張子インデックス指定
                 ext = os.path.splitext(uploaded_file.name)[1].lower()
                 temp_filename = f"temp_audio{ext}"
                 with open(temp_filename, "wb") as f:
@@ -107,7 +107,7 @@ with right_col:
                 ■ 3. 企画案B（同上）
                 """
                 
-                # 2026年10月現在の有効な最新SDK推奨モデル「gemini-2.5-flash」を維持
+                # 404を回避する最新世代のオフィシャル標準モデル名「gemini-2.5-flash」を正確に指定
                 response = client.models.generate_content(model='gemini-2.5-flash', contents=[audio_file_ref, prompt])
                 output_text = response.text
                 
