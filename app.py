@@ -10,7 +10,7 @@ is_admin = False
 if "admin" in query_params:
     param_val = query_params["admin"]
     if isinstance(param_val, list):
-        is_admin = len(param_val) > 0 and param_val == "true"
+        is_admin = len(param_val) > 0 and param_val[0] == "true"
     else:
         is_admin = param_val == "true"
 
@@ -73,7 +73,7 @@ with right_col:
                     st.stop()
                     
                 client = genai.Client(api_key=api_key)
-                ext = os.path.splitext(uploaded_file.name).lower()
+                ext = os.path.splitext(uploaded_file.name)[1].lower()
                 temp_filename = f"temp_audio{ext}"
                 with open(temp_filename, "wb") as f:
                     f.write(uploaded_file.getbuffer())
@@ -105,7 +105,6 @@ with right_col:
                 ■ 3. 企画案B（同上）
                 """
                 
-                # 404を回避するため Google公式指定の有効な最新モデル 'gemini-3.8-flash' へ固定
                 response = client.models.generate_content(model='gemini-3.8-flash', contents=[audio_file_ref, prompt])
                 output_text = response.text
                 
