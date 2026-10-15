@@ -34,7 +34,7 @@ def sync_ng(): st.session_state["ng_val"] = st.session_state["k5"]
 if is_admin:
     left_col, right_col = st.columns(2, gap="large")
 else:
-    left_spacer, center_box, right_spacer = st.columns()
+    left_spacer, center_box, right_spacer = st.columns(3)
     right_col = center_box
 
 if is_admin:
