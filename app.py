@@ -64,7 +64,7 @@ with right_col:
         
         if st.button("議事録・新事業企画案の自動生成を開始", type="primary", use_container_width=True):
             status_placeholder = st.empty()
-            status_placeholder.markdown("⏳ **大容量音声を转送しながら、Geminiで冷徹に解析中... (1〜3分かかります)**")
+            status_placeholder.markdown("⏳ **大容量音声を转送しながら、Geminiで解析中... (1〜3分かかります)**")
             
             try:
                 api_key = os.environ.get("GEMINI_API_KEY")
