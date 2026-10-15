@@ -74,7 +74,7 @@ with right_col:
                     
                 client = genai.Client(api_key=api_key)
                 
-                ext = os.path.splitext(uploaded_file.name).lower()
+                ext = os.path.splitext(uploaded_file.name)[1]lower()
                 temp_filename = f"temp_audio{ext}"
                 with open(temp_filename, "wb") as f:
                     f.write(uploaded_file.getbuffer())
