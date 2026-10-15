@@ -23,7 +23,7 @@ if "pre_val" not in st.session_state:
 if "target_val" not in st.session_state:
     st.session_state["target_val"] = "・年々高齢化する40～60代女性という光文社女性誌の既存読者だけでなく、もっと若い世代、男性、オタク層、推し活層、在日外国人その他の「新たなマーケット」を開拓する。"
 if "ng_val" not in st.session_state:
-    st.session_state["ng_val"] = "・コンサル的な「お行儀の良い一般論」「誰でも言える綺麗事（絆、おモテなし）」。\n・予算を無駄に食う割に、現場を動かせないハコモノ的な大袈裟な提案。"
+    st.session_state["ng_val"] = "・コンサル的な「お行儀の良い一般論」「誰でも言える綺麗事（絆、おもてなし）」。\n・予算を無駄に食う割に、現場を動かせないハコモノ的な大袈裟な提案。"
 
 def sync_title(): st.session_state["title_val"] = st.session_state["k1"]
 def sync_desc(): st.session_state["desc_val"] = st.session_state["k2"]
@@ -74,7 +74,8 @@ with right_col:
                     
                 client = genai.Client(api_key=api_key)
                 
-                ext = os.path.splitext(uploaded_file.name).lower()
+                # タプルエラーの真犯人であった「インデックス指定の漏れ」を厳密に修正（[1]を付与）
+                ext = os.path.splitext(uploaded_file.name)[1].lower()
                 temp_filename = f"temp_audio{ext}"
                 with open(temp_filename, "wb") as f:
                     f.write(uploaded_file.getbuffer())
@@ -106,7 +107,7 @@ with right_col:
                 ■ 3. 企画案B（同上）
                 """
                 
-                # 404エラーおよび503制限を回避する現行SDK正規の最新稼働モデル指定
+                # 2026年10月現在の有効な最新SDK推奨モデル「gemini-2.5-flash」を維持
                 response = client.models.generate_content(model='gemini-2.5-flash', contents=[audio_file_ref, prompt])
                 output_text = response.text
                 
