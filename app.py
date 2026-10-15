@@ -74,8 +74,7 @@ with right_col:
                     
                 client = genai.Client(api_key=api_key)
                 
-                # タプルバグを回避する正規の拡張子インデックス指定
-                ext = os.path.splitext(uploaded_file.name)[1].lower()
+                ext = os.path.splitext(uploaded_file.name).lower()
                 temp_filename = f"temp_audio{ext}"
                 with open(temp_filename, "wb") as f:
                     f.write(uploaded_file.getbuffer())
@@ -107,7 +106,7 @@ with right_col:
                 ■ 3. 企画案B（同上）
                 """
                 
-                # 404を回避する最新世代のオフィシャル標準モデル名「gemini-2.5-flash」を正確に指定
+                # 404エラーを回避するSDK正規の最新稼働モデル指定
                 response = client.models.generate_content(model='gemini-2.5-flash', contents=[audio_file_ref, prompt])
                 output_text = response.text
                 
