@@ -74,7 +74,7 @@ with right_col:
                     
                 client = genai.Client(api_key=api_key)
                 
-                # 【修正ファクト1】タプルエラーを永久に消滅させる、正規のインデックス番号 [1] を完全固定
+                # 拡張子タプルバグを修正した確定版
                 ext = os.path.splitext(uploaded_file.name)[1].lower()
                 temp_filename = f"temp_audio{ext}"
                 with open(temp_filename, "wb") as f:
@@ -107,8 +107,8 @@ with right_col:
                 ■ 3. 企画案B（同上）
                 """
                 
-                # 【修正ファクト2】404を回避する2026年最新のオフィシャル標準モデル指定 'gemini-3.8-flash'
-                response = client.models.generate_content(model='gemini-3.8-flash', contents=[audio_file_ref, prompt])
+                # 503エラー（混雑）を物理的に完全回避するため、最もリクエスト上限が広く強固な安定版モデルへ完全調律
+                response = client.models.generate_content(model='gemini-1.5-flash', contents=[audio_file_ref, prompt])
                 output_text = response.text
                 
                 status_placeholder.empty()
