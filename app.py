@@ -5,7 +5,6 @@ from google import genai
 
 st.set_page_config(page_title="光文社ビジネスクリエーション部", layout="wide")
 
-# 1行目からの自動再実行によるリセットを100%物理的に防ぐ、生きたメモリ同期格納庫の構築
 if "site_title" not in st.session_state:
     st.session_state["site_title"] = "光文社ビジネスクリエーション部・新事業創出システム"
 if "site_desc" not in st.session_state:
@@ -15,9 +14,8 @@ if "prompt_pre" not in st.session_state:
 if "prompt_target" not in st.session_state:
     st.session_state["prompt_target"] = "・年々高齢化する40～60代女性という既存読者だけでなく、もっと若い世代、男性、オタク層、推し活層、在日外国人その他の「新たなマーケット」を開拓する。"
 if "prompt_ng" not in st.session_state:
-    st.session_state["prompt_ng"] = "・コンサル的な「お行儀の良い一般論」「誰でも言える綺麗事（絆、おもてなし）」。\n・予算を無駄に食う割に、現場を動かせないハコモノ的な大裟な提案。"
+    st.session_state["prompt_ng"] = "・コンサル的な「お行儀の良い一般論」「誰でも言える綺麗事（絆、おもてなし）」。\n・予算を無駄に食う割に、現場を動かせないハコモノ的な大袈裟な提案。"
 
-# 画面で文字が確定した瞬間に、最優先でメモリを最新状態へ強制上書きアップデートさせるコールバック命令群
 def update_title(): st.session_state["site_title"] = st.session_state["input_title"]
 def update_desc(): st.session_state["site_desc"] = st.session_state["input_desc"]
 def update_pre(): st.session_state["prompt_pre"] = st.session_state["input_pre"]
@@ -25,29 +23,32 @@ def update_target(): st.session_state["prompt_target"] = st.session_state["input
 def update_ng(): st.session_state["prompt_ng"] = st.session_state["input_ng"]
 
 query_params = st.query_params
-is_admin = query_params.get("admin") == "true"
+is_admin = False
+if "admin" in query_params:
+    param_val = query_params["admin"]
+    if isinstance(param_val, list):
+        is_admin = len(param_val) > 0 and param_val[0] == "true"
+    else:
+        is_admin = param_val == "true"
 
-left_col, right_col = st.columns(2, gap="large")
+if is_admin:
+    left_col, right_col = st.columns(2, gap="large")
+else:
+    left_spacer, center_box, right_spacer = st.columns([1, 2, 1])
+    right_col = center_box
 
-# --- 【あなた（管理者）だけに現れるシークレット編集パネル】 ---
-with left_col:
-    if is_admin:
+if is_admin:
+    with left_col:
         st.markdown("### 🛠️ 【管理者専用】サイト文言・前提条件の自由編集")
-        
-        # コールバック（on_change）をガチガチに噛み合わせ、古い標準文字による自動リセットを完全阻止
         st.text_input("⚙️ システムのメインタイトル", value=st.session_state["site_title"], key="input_title", on_change=update_title)
         st.text_area("⚙️ システムの説明文", value=st.session_state["site_desc"], key="input_desc", height=70, on_change=update_desc)
-        
         st.markdown("---")
         st.markdown("### 🎯 戦略文脈（プロンプト）の書き換え")
         st.text_area("■ 前提条件", value=st.session_state["prompt_pre"], key="input_pre", height=180, on_change=update_pre)
         st.text_area("■ 狙うべきターゲット層", value=st.session_state["prompt_target"], key="input_target", height=100, on_change=update_target)
         st.text_area("■ 排除すべきNG項目", value=st.session_state["prompt_ng"], key="input_ng", height=100, on_change=update_ng)
         st.markdown("---")
-    else:
-        st.empty()
 
-# --- 【右側：一般ユーザーおよびあなたが見る、オフィシャルなメイン画面】 ---
 with right_col:
     st.markdown(f"""
     <div style="background-color: #1E293B; padding: 25px; border-radius: 10px; margin-bottom: 25px; border: 1px solid #334155;">
@@ -56,7 +57,6 @@ with right_col:
     </div>
     """, unsafe_allow_html=True)
     
-    st.markdown("### 🛠️ 音声ファイルのドロップ")
     uploaded_file = st.file_uploader("会議の録音ファイル（音声）をここにドラッグ＆ドロップしてください", type=["mp3", "m4a", "wav"], label_visibility="collapsed")
     
     if uploaded_file:
@@ -73,7 +73,7 @@ with right_col:
                     st.stop()
                     
                 client = genai.Client(api_key=api_key)
-                ext = os.path.splitext(uploaded_file.name).lower()
+                ext = os.path.splitext(uploaded_file.name)[1].lower()
                 temp_filename = f"temp_audio{ext}"
                 with open(temp_filename, "wb") as f:
                     f.write(uploaded_file.getbuffer())
