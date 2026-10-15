@@ -5,7 +5,7 @@ from google import genai
 
 st.set_page_config(page_title="光文社ビジネスクリエーション部", layout="wide")
 
-# 1. サーバー実行時にURLパラメータを最優先で取得
+# URLからadminパラメータ（管理画面解放フラグ）を判定
 query_params = st.query_params
 is_admin = False
 if "admin" in query_params:
@@ -15,19 +15,19 @@ if "admin" in query_params:
     else:
         is_admin = param_val == "true"
 
-# 2. セッション情報の初期値を完全に独立させて定義
+# ご指定いただいた最新の文言・生存戦略方程式を、システムの標準OS（初期値）としてダイレクトに完全固定
 if "title_val" not in st.session_state:
-    st.session_state["title_val"] = "光文社ビジネスクリエーション部・新事業創出システム"
+    st.session_state["title_val"] = "Kobunsha BIZ-CREA"
 if "desc_val" not in st.session_state:
-    st.session_state["desc_val"] = "1時間以上の長大な会議音声にも対応。お気持ちの呪縛やコンサルの綺麗事を焼き尽くし、冷徹な議事録と尖った新事業の思想をサルベージします。"
+    st.session_state["desc_val"] = "1時間以上の長大な会議音声にも対応。会議や打ち合わせの議事録と新事業の企画案ドラフトを出力します。"
 if "pre_val" not in st.session_state:
-    st.session_state["pre_val"] = "・現在の出版業界は非常に厳しい。既存の「紙」や、失敗に終わった消耗戦のコタツ記事デジタルから完全に脱却する。\n・紙、デジタルにとらわれず、イベント、スクールビジネス、終活ビジネス等々の「光文社が手がけなかった」業務を生み出す。\n・既存雑誌・書籍と一切関係ないK-POP関係の出版物、グッズ販売、イベント等を行ってきた。\n・フィジカルか、AIか、動画か、SNSかを問わず、新たなビジネスイメージを作りたい。\n・ただし「出版社がやるビジネス」の矜持を死守。「ラーメン屋」「キャバクラ」は厳禁。海外の最新事例の構造も参照すること。"
+    st.session_state["pre_val"] = "・現在の出版業界は非常に厳しい。既存の「紙」や、失敗に終わった消耗戦のコタツ記事デジタルから完全に脱却する。\n・紙、デジタルにとらわれず、イベント、スクールビジネス、終活ビジネス等々の「光文社が手がけなかった」新規事業を生み出す。\n・既存雑誌・書籍と一切関係ないK-POP関係の出版物、グッズ販売、イベント等を行ってきた。\n・フィジカルか、AIか、動画か、SNSかを問わず、新たなビジネスイメージを作りたい。\n・もちろん、書籍やIPといった出版社の事業も大切。\n・ただし「出版社がやるビジネス」のイメージを守る。ラーメン屋やキャバクラを経営してどうする？\n・海外の最新事例の構造も参照すること。"
 if "target_val" not in st.session_state:
-    st.session_state["target_val"] = "・年々高齢化する40～60代女性という既存読者だけでなく、もっと若い世代、男性、オタク層、推し活層、在日外国人その他の「新たなマーケット」を開拓する。"
+    st.session_state["target_val"] = "・年々高齢化する40～60代女性という光文社女性誌の既存読者だけでなく、もっと若い世代、男性、オタク層、推し活層、在日外国人その他の「新たなマーケット」を開拓する。"
 if "ng_val" not in st.session_state:
     st.session_state["ng_val"] = "・コンサル的な「お行儀の良い一般論」「誰でも言える綺麗事（絆、おもてなし）」。\n・予算を無駄に食う割に、現場を動かせないハコモノ的な大袈裟な提案。"
 
-# 3. 画面に入力された瞬間に、競合を起こさずに値を強制上書きするコールバック関数
+# 確定クリック時に入力値を競合なしで強制同期させるコールバックシステム
 def sync_title(): st.session_state["title_val"] = st.session_state["k1"]
 def sync_desc(): st.session_state["desc_val"] = st.session_state["k2"]
 def sync_pre(): st.session_state["pre_val"] = st.session_state["k3"]
@@ -37,10 +37,10 @@ def sync_ng(): st.session_state["ng_val"] = st.session_state["k5"]
 if is_admin:
     left_col, right_col = st.columns(2, gap="large")
 else:
-    left_spacer, center_box, right_spacer = st.columns([1, 2, 1])
+    left_spacer, center_box, right_spacer = st.columns([1, 8, 1])
     right_col = center_box
 
-# --- 【管理者専用編集パネル：valueとkeyを完全に分離】 ---
+# --- 【管理者専用編集パネル：初期値競合バグを完全にパージした構造】 ---
 if is_admin:
     with left_col:
         st.markdown("### 🛠️ 【管理者専用】サイト文言・前提条件の自由編集")
@@ -48,20 +48,21 @@ if is_admin:
         st.text_area("⚙️ システムの説明文", value=st.session_state["desc_val"], key="k2", height=70, on_change=sync_desc)
         st.markdown("---")
         st.markdown("### 🎯 戦略文脈（プロンプト）の書き換え")
-        st.text_area("■ 前提条件", value=st.session_state["pre_val"], key="k3", height=180, on_change=sync_pre)
+        st.text_area("■ 前提条件", value=st.session_state["pre_val"], key="k3", height=220, on_change=sync_pre)
         st.text_area("■ 狙うべきターゲット層", value=st.session_state["target_val"], key="k4", height=100, on_change=sync_target)
         st.text_area("■ 排除すべきNG項目", value=st.session_state["ng_val"], key="k5", height=100, on_change=sync_ng)
         st.markdown("---")
 
-# --- 【オフィシャルメイン画面：最新情報がリアルタイム反映】 ---
+# --- 【右側：あなたが求めていた本物のオフィシャル画面】 ---
 with right_col:
     st.markdown(f"""
     <div style="background-color: #1E293B; padding: 25px; border-radius: 10px; margin-bottom: 25px; border: 1px solid #334155;">
-        <h1 style="color: #F8FAFC; margin: 0; font-size: 24px;">🚀 {st.session_state["title_val"]}</h1>
-        <p style="color: #94A3B8; margin-top: 8px; margin-bottom: 0; font-size: 13px; line-height: 1.5;">{st.session_state["desc_val"]}</p>
+        <h1 style="color: #F8FAFC; margin: 0; font-size: 26px; font-weight: 700;">🚀 {st.session_state["title_val"]}</h1>
+        <p style="color: #94A3B8; margin-top: 10px; margin-bottom: 0; font-size: 14px; line-height: 1.6;">{st.session_state["desc_val"]}</p>
     </div>
     """, unsafe_allow_html=True)
     
+    st.markdown("### 🛠️ 音声ファイルのドロップ")
     uploaded_file = st.file_uploader("会議の録音ファイル（音声）をここにドラッグ＆ドロップしてください", type=["mp3", "m4a", "wav"], label_visibility="collapsed")
     
     if uploaded_file:
