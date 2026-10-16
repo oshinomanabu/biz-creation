@@ -1,10 +1,104 @@
 import streamlit as st
 import os
 import time
+import random
+import tempfile
 from google import genai
+from google.genai import errors as genai_errors
 
 st.set_page_config(page_title="光文社ビジネスクリエーション部", layout="wide")
 
+# =========================================================
+# 503対策の設定
+# =========================================================
+# 上から順に試す。存在しないモデル(404)は自動で飛ばすので、
+# 名前が分からなくても候補を並べておけばよい。
+MODEL_CANDIDATES = [
+    "gemini-3.8-flash",
+    "gemini-3.5-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-2.5-flash",
+]
+RETRYABLE_CODES = {429, 500, 503, 504}   # 混雑・一時障害とみなして再試行するコード
+MAX_ATTEMPTS_PER_MODEL = 5               # 1モデルあたりの試行回数
+BASE_WAIT_SEC = 10                       # 初回の待ち時間（以後倍々）
+MAX_WAIT_SEC = 120                       # 1回の待ち時間の上限
+FILE_PROCESS_TIMEOUT_SEC = 900           # 音声のサーバー側処理待ちの上限
+
+
+def wait_with_message(status, seconds, reason):
+    """待ち時間を残り秒数つきで表示しながら待つ"""
+    end = time.time() + seconds
+    while True:
+        remain = int(end - time.time())
+        if remain <= 0:
+            break
+        status.markdown(f"⏳ **{reason}。{remain}秒後に再試行します…**（社内向けのため、そのままお待ちください）")
+        time.sleep(1)
+
+
+def upload_with_retry(client, path, mime_type, status):
+    """音声アップロード自体も混雑で失敗することがあるので再試行する"""
+    last_error = None
+    for attempt in range(1, 4):
+        try:
+            status.markdown(f"⏳ **音声ファイルを転送中…（{attempt}/3回目）**")
+            return client.files.upload(file=path, config={"mime_type": mime_type})
+        except genai_errors.APIError as e:
+            last_error = e
+            if e.code not in RETRYABLE_CODES or attempt == 3:
+                raise
+            wait_with_message(status, BASE_WAIT_SEC * attempt, f"転送が混雑しています（エラー{e.code}）")
+    raise last_error
+
+
+def wait_until_active(client, file_ref, status):
+    """サーバー側の音声処理完了を待つ。上限時間とFAILEDを検知する"""
+    start = time.time()
+    while file_ref.state.name == "PROCESSING":
+        elapsed = int(time.time() - start)
+        if elapsed > FILE_PROCESS_TIMEOUT_SEC:
+            raise TimeoutError("音声ファイルの処理が時間内に終わりませんでした。")
+        status.markdown(f"⏳ **音声ファイルを準備中…（{elapsed}秒経過）**")
+        time.sleep(5)
+        file_ref = client.files.get(name=file_ref.name)
+    if file_ref.state.name != "ACTIVE":
+        raise RuntimeError(f"音声ファイルの処理に失敗しました（状態: {file_ref.state.name}）")
+    return file_ref
+
+
+def generate_with_retry(client, contents, status):
+    """候補モデルを順に試し、混雑時は指数バックオフで再試行する"""
+    last_error = None
+    for model in MODEL_CANDIDATES:
+        for attempt in range(1, MAX_ATTEMPTS_PER_MODEL + 1):
+            try:
+                status.markdown(f"⏳ **{model} で解析中…（{attempt}/{MAX_ATTEMPTS_PER_MODEL}回目・1〜3分かかります）**")
+                response = client.models.generate_content(model=model, contents=contents)
+                if not response.text:
+                    raise RuntimeError("Geminiから空の応答が返りました。")
+                return response.text, model
+            except genai_errors.APIError as e:
+                last_error = e
+                if e.code == 404:
+                    # このモデル名は存在しない → 待たずに次の候補へ
+                    break
+                if e.code not in RETRYABLE_CODES:
+                    # 音声形式の不備など、再試行しても直らないエラー
+                    raise
+                if attempt == MAX_ATTEMPTS_PER_MODEL:
+                    # このモデルは諦めて次の候補へ
+                    break
+                wait = min(MAX_WAIT_SEC, BASE_WAIT_SEC * (2 ** (attempt - 1))) + random.uniform(0, 3)
+                wait_with_message(status, wait, f"{model} が混雑しています（エラー{e.code}）")
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("利用可能なモデルが見つかりませんでした。")
+
+
+# =========================================================
+# ここから下は元の画面構成のまま
+# =========================================================
 query_params = st.query_params
 is_admin = False
 if "admin" in query_params:
@@ -56,37 +150,39 @@ with right_col:
         <p style="color: #94A3B8; margin-top: 14px; margin-bottom: 0; font-size: 14px; line-height: 1.6;">{st.session_state["desc_val"]}</p>
     </div>
     """, unsafe_allow_html=True)
-    
+
     uploaded_file = st.file_uploader("会議の録音ファイル（音声）をここにドラッグ＆ドロップしてください", type=["mp3", "m4a", "wav"], label_visibility="collapsed")
-    
+
     if uploaded_file:
         st.markdown(f"**🟢 検知:** `{uploaded_file.name}` ({uploaded_file.size/1024/1024:.2f} MB)")
-        
+
         if st.button("議事録・新事業企画案の自動生成を開始", type="primary", use_container_width=True):
             status_placeholder = st.empty()
-            status_placeholder.markdown("⏳ **大容量音声を転送しながら、Geminiで解析中... (1〜3分かかります)**")
-            
+
+            api_key = os.environ.get("GEMINI_API_KEY")
+            if not api_key:
+                st.error("認証エラー: GEMINI_API_KEYが登録されていません。")
+                st.stop()
+
+            client = genai.Client(api_key=api_key)
+            temp_path = None
+            audio_file_ref = None
+
             try:
-                api_key = os.environ.get("GEMINI_API_KEY")
-                if not api_key:
-                    st.error("認証エラー: GEMINI_API_KEYが登録されていません。")
-                    st.stop()
-                    
-                client = genai.Client(api_key=api_key)
-                
                 ext = os.path.splitext(uploaded_file.name)[1].lower()
-                temp_filename = f"temp_audio{ext}"
-                with open(temp_filename, "wb") as f:
-                    f.write(uploaded_file.getbuffer())
-                
+
+                # 利用者ごとに別名の一時ファイルを作る（同時利用での上書き防止）
+                with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
+                    tmp.write(uploaded_file.getbuffer())
+                    temp_path = tmp.name
+
                 mime_map = {'.wav': 'audio/wav', '.mp3': 'audio/mp3', '.m4a': 'audio/m4a'}
                 mime_type = mime_map.get(ext, 'audio/mp3')
-                audio_file_ref = client.files.upload(file=temp_filename, config={'mime_type': mime_type})
-                
-                while audio_file_ref.state.name == "PROCESSING":
-                    time.sleep(5)
-                    audio_file_ref = client.files.get(name=audio_file_ref.name)
-                
+
+                # 音声は1回だけアップロードし、再試行ではこれを使い回す
+                audio_file_ref = upload_with_retry(client, temp_path, mime_type, status_placeholder)
+                audio_file_ref = wait_until_active(client, audio_file_ref, status_placeholder)
+
                 prompt = f"""
                 あなたは光文社ビジネスクリエーション部のディレクターとして、高度な論理的知性を持って冷徹に会話を分析する専門家です。
                 添付された音声内容を構造的に分析し、お気持ちの一般論や綺麗事を1文字残さず焼き尽くした【議事録】と、出版社としてのプライドを持った【尖った新事業の企画ドラフト案2つ】を出力してください。
@@ -105,14 +201,12 @@ with right_col:
                 ■ 2. 企画案A（タイトル、核心アイデア、コストの引き算、参照すべき海外最新事例、具体的な実行ステップ）
                 ■ 3. 企画案B（同上）
                 """
-                
-                # 104行目のモデル指定をインフラ側のエラーメッセージに従い 'gemini-3.8-flash' へ厳密に変更
-                response = client.models.generate_content(model='gemini-3.8-flash', contents=[audio_file_ref, prompt])
-                output_text = response.text
-                
+
+                output_text, used_model = generate_with_retry(client, [audio_file_ref, prompt], status_placeholder)
+
                 status_placeholder.empty()
-                st.success("✅ 解析が完了しました。成果物(TXT)をダウンロードしてください。")
-                
+                st.success(f"✅ 解析が完了しました（使用モデル: {used_model}）。成果物(TXT)をダウンロードしてください。")
+
                 st.download_button(
                     label="📥 成果物(TXT)をダウンロードする",
                     data=output_text,
@@ -120,12 +214,25 @@ with right_col:
                     mime="text/plain",
                     use_container_width=True
                 )
-                
+
                 st.markdown("### 🎯 成果物プレビュー")
                 st.text(output_text)
-                
-                client.files.delete(name=audio_file_ref.name)
-                os.remove(temp_filename)
+
+            except genai_errors.APIError as e:
+                status_placeholder.empty()
+                if e.code in RETRYABLE_CODES:
+                    st.error(f"Geminiの混雑が続いており、全モデルで再試行しましたが完了できませんでした（エラー{e.code}）。時間をおいて再実行してください。")
+                else:
+                    st.error(f"Geminiでエラーが発生しました（エラー{e.code}）: {e}")
             except Exception as e:
                 status_placeholder.empty()
                 st.error(f"エラーが発生しました: {e}")
+            finally:
+                # 成功・失敗にかかわらず、Gemini側とサーバー側の音声を必ず削除
+                if audio_file_ref is not None:
+                    try:
+                        client.files.delete(name=audio_file_ref.name)
+                    except Exception:
+                        pass
+                if temp_path and os.path.exists(temp_path):
+                    os.remove(temp_path)
