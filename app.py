@@ -14,8 +14,9 @@ st.set_page_config(page_title="光文社ビジネスクリエーション部", l
 # 上から順に試す。存在しないモデル(404)は自動で飛ばすので、
 # 名前が分からなくても候補を並べておけばよい。
 MODEL_CANDIDATES = [
-    "gemini-3.8-flash",
-    "gemini-3.5-flash",
+    "gemini-3.6-flash",          # メイン（社内で利用可能と確認済み）
+    "gemini-3.6-flash-preview",  # 正式名に -preview が付く場合の保険
+    "gemini-3.5-flash",          # 以下、混雑時の代替（存在しなければ自動で飛ばす）
     "gemini-3.1-flash-lite",
     "gemini-2.5-flash",
 ]
