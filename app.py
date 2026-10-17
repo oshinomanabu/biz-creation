@@ -1,18 +1,26 @@
 import streamlit as st
 import os
+import io
+import re
+import html
 import time
 import random
 import tempfile
+from datetime import datetime, timezone, timedelta
 from google import genai
 from google.genai import errors as genai_errors
+from docx import Document
+from docx.shared import Pt, RGBColor
+from docx.oxml.ns import qn
 
 st.set_page_config(page_title="光文社ビジネスクリエーション部", layout="wide")
+
+JST = timezone(timedelta(hours=9))
 
 # =========================================================
 # 503対策の設定
 # =========================================================
-# 上から順に試す。存在しないモデル(404)は自動で飛ばすので、
-# 名前が分からなくても候補を並べておけばよい。
+# 上から順に試す。存在しないモデル(404)は自動で飛ばす。
 MODEL_CANDIDATES = [
     "gemini-3.6-flash",          # メイン（社内で利用可能と確認済み）
     "gemini-3.6-flash-preview",  # 正式名に -preview が付く場合の保険
@@ -27,40 +35,218 @@ MAX_WAIT_SEC = 120                       # 1回の待ち時間の上限
 FILE_PROCESS_TIMEOUT_SEC = 900           # 音声のサーバー側処理待ちの上限
 
 
-def wait_with_message(status, seconds, reason):
+# =========================================================
+# 見た目（CSS）
+# =========================================================
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap');
+
+html, body, [class*="css"], .stMarkdown, .stText, button, input, textarea {
+    font-family: 'Noto Sans JP', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', sans-serif;
+}
+.stApp { background: #F5F6F8; }
+header[data-testid="stHeader"] { background: transparent; }
+footer { visibility: hidden; }
+.block-container { padding-top: 2.2rem; padding-bottom: 4rem; }
+
+/* ヘッダー */
+.bc-header {
+    background: #1E293B;
+    border-radius: 6px;
+    padding: 30px 34px 28px;
+    margin-bottom: 28px;
+    border-top: 3px solid #B08D57;
+}
+.bc-kicker {
+    color: #B08D57;
+    font-size: 11px;
+    letter-spacing: 0.22em;
+    font-weight: 500;
+    margin: 0 0 10px;
+}
+.bc-title {
+    color: #F8FAFC;
+    font-size: 34px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    margin: 0;
+    padding: 0;
+    line-height: 1.25;
+}
+.bc-desc {
+    color: #94A3B8;
+    font-size: 13.5px;
+    line-height: 1.7;
+    margin: 12px 0 0;
+}
+
+/* セクション見出し */
+.bc-label {
+    font-size: 12px;
+    font-weight: 700;
+    color: #475569;
+    letter-spacing: 0.12em;
+    margin: 6px 0 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #E2E8F0;
+}
+
+/* アップロード欄 */
+[data-testid="stFileUploaderDropzone"] {
+    background: #FFFFFF;
+    border: 1.5px dashed #CBD5E1;
+    border-radius: 6px;
+}
+[data-testid="stFileUploaderDropzone"]:hover { border-color: #1E293B; }
+
+.bc-file {
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-left: 3px solid #1E293B;
+    border-radius: 4px;
+    padding: 10px 14px;
+    font-size: 13.5px;
+    color: #1E293B;
+    margin: 10px 0 14px;
+}
+.bc-file span { color: #64748B; margin-left: 8px; }
+
+/* ボタン */
+.stButton > button, .stDownloadButton > button {
+    border-radius: 4px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    padding: 0.6rem 1rem;
+}
+
+/* 進行表示 */
+.bc-progress {
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 6px;
+    padding: 20px 22px 18px;
+    margin: 14px 0;
+}
+.bc-steps { display: flex; align-items: center; gap: 0; }
+.bc-step { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #94A3B8; white-space: nowrap; }
+.bc-dot {
+    width: 24px; height: 24px; border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700;
+    border: 1.5px solid #CBD5E1; color: #94A3B8; background: #FFFFFF;
+}
+.bc-step.done { color: #1E293B; }
+.bc-step.done .bc-dot { background: #1E293B; border-color: #1E293B; color: #FFFFFF; }
+.bc-step.active { color: #1E293B; font-weight: 700; }
+.bc-step.active .bc-dot { border-color: #B08D57; color: #B08D57; border-width: 2px; }
+.bc-line { flex: 1; height: 1px; background: #E2E8F0; margin: 0 12px; min-width: 16px; }
+.bc-line.done { background: #1E293B; }
+.bc-msg { margin-top: 14px; font-size: 13px; color: #475569; line-height: 1.6; }
+.bc-msg.wait { color: #92400E; }
+
+/* 結果 */
+.bc-result-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    border-bottom: 2px solid #1E293B;
+    padding-bottom: 8px; margin: 34px 0 14px;
+}
+.bc-rh-title { margin: 0; font-size: 18px; color: #1E293B; font-weight: 700; }
+.bc-result-head span { font-size: 12px; color: #64748B; }
+
+.stTabs [data-baseweb="tab-list"] { gap: 4px; border-bottom: 1px solid #E2E8F0; }
+.stTabs [data-baseweb="tab"] { padding: 8px 18px; }
+.stTabs [data-baseweb="tab"] p { font-size: 14px !important; font-weight: 500; }
+.stTabs [role="tabpanel"] {
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-top: none;
+    border-radius: 0 0 6px 6px;
+    padding: 22px 28px;
+}
+.stTabs [role="tabpanel"] p, .stTabs [role="tabpanel"] li {
+    font-size: 14.5px; line-height: 1.85; color: #1E293B;
+}
+.stTabs [role="tabpanel"] h3, .stTabs [role="tabpanel"] h4 {
+    color: #1E293B; border-left: 3px solid #B08D57; padding: 2px 0 2px 12px; margin: 0.4em 0 0.8em;
+    font-size: 19px !important; font-weight: 700;
+}
+.stTabs [role="tabpanel"] strong { color: #0F172A; }
+.stTabs [role="tabpanel"] table { font-size: 13.5px; }
+
+/* 管理画面 */
+.bc-admin {
+    font-size: 12px; font-weight: 700; color: #B08D57; letter-spacing: 0.16em;
+    margin-bottom: 4px;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+# =========================================================
+# 進行表示
+# =========================================================
+STEPS = ["音声を転送", "音声を準備", "Geminiで解析"]
+
+
+def render_progress(ph, step, message, waiting=False):
+    """step: 0〜2 = 実行中の段, 3 = 全段完了"""
+    parts = []
+    for i, name in enumerate(STEPS):
+        if i < step:
+            cls, mark = "done", "✓"
+        elif i == step:
+            cls, mark = "active", str(i + 1)
+        else:
+            cls, mark = "", str(i + 1)
+        parts.append(f'<div class="bc-step {cls}"><span class="bc-dot">{mark}</span>{name}</div>')
+        if i < len(STEPS) - 1:
+            parts.append(f'<div class="bc-line {"done" if i < step else ""}"></div>')
+    msg_cls = "bc-msg wait" if waiting else "bc-msg"
+    ph.markdown(
+        f'<div class="bc-progress"><div class="bc-steps">{"".join(parts)}</div>'
+        f'<div class="{msg_cls}">{message}</div></div>',
+        unsafe_allow_html=True,
+    )
+
+
+def wait_with_message(ph, step, seconds, reason):
     """待ち時間を残り秒数つきで表示しながら待つ"""
     end = time.time() + seconds
     while True:
         remain = int(end - time.time())
         if remain <= 0:
             break
-        status.markdown(f"⏳ **{reason}。{remain}秒後に再試行します…**（社内向けのため、そのままお待ちください）")
+        render_progress(ph, step, f"{reason}。<b>{remain}秒後に再試行します。</b>そのままお待ちください。", waiting=True)
         time.sleep(1)
 
 
-def upload_with_retry(client, path, mime_type, status):
+# =========================================================
+# Gemini呼び出し（503対策）
+# =========================================================
+def upload_with_retry(client, path, mime_type, ph):
     """音声アップロード自体も混雑で失敗することがあるので再試行する"""
     last_error = None
     for attempt in range(1, 4):
         try:
-            status.markdown(f"⏳ **音声ファイルを転送中…（{attempt}/3回目）**")
+            render_progress(ph, 0, f"音声ファイルを転送しています…（{attempt}/3回目）")
             return client.files.upload(file=path, config={"mime_type": mime_type})
         except genai_errors.APIError as e:
             last_error = e
             if e.code not in RETRYABLE_CODES or attempt == 3:
                 raise
-            wait_with_message(status, BASE_WAIT_SEC * attempt, f"転送が混雑しています（エラー{e.code}）")
+            wait_with_message(ph, 0, BASE_WAIT_SEC * attempt, f"転送が混雑しています（エラー{e.code}）")
     raise last_error
 
 
-def wait_until_active(client, file_ref, status):
+def wait_until_active(client, file_ref, ph):
     """サーバー側の音声処理完了を待つ。上限時間とFAILEDを検知する"""
     start = time.time()
     while file_ref.state.name == "PROCESSING":
         elapsed = int(time.time() - start)
         if elapsed > FILE_PROCESS_TIMEOUT_SEC:
             raise TimeoutError("音声ファイルの処理が時間内に終わりませんでした。")
-        status.markdown(f"⏳ **音声ファイルを準備中…（{elapsed}秒経過）**")
+        render_progress(ph, 1, f"Gemini側で音声を準備しています…（{elapsed}秒経過）")
         time.sleep(5)
         file_ref = client.files.get(name=file_ref.name)
     if file_ref.state.name != "ACTIVE":
@@ -68,13 +254,13 @@ def wait_until_active(client, file_ref, status):
     return file_ref
 
 
-def generate_with_retry(client, contents, status):
+def generate_with_retry(client, contents, ph):
     """候補モデルを順に試し、混雑時は指数バックオフで再試行する"""
     last_error = None
     for model in MODEL_CANDIDATES:
         for attempt in range(1, MAX_ATTEMPTS_PER_MODEL + 1):
             try:
-                status.markdown(f"⏳ **{model} で解析中…（{attempt}/{MAX_ATTEMPTS_PER_MODEL}回目・1〜3分かかります）**")
+                render_progress(ph, 2, f"{model} で解析しています…（{attempt}/{MAX_ATTEMPTS_PER_MODEL}回目）。1時間の音声で1〜3分ほどかかります。")
                 response = client.models.generate_content(model=model, contents=contents)
                 if not response.text:
                     raise RuntimeError("Geminiから空の応答が返りました。")
@@ -82,23 +268,148 @@ def generate_with_retry(client, contents, status):
             except genai_errors.APIError as e:
                 last_error = e
                 if e.code == 404:
-                    # このモデル名は存在しない → 待たずに次の候補へ
-                    break
+                    break  # このモデル名は存在しない → 待たずに次の候補へ
                 if e.code not in RETRYABLE_CODES:
-                    # 音声形式の不備など、再試行しても直らないエラー
-                    raise
+                    raise  # 再試行しても直らないエラー
                 if attempt == MAX_ATTEMPTS_PER_MODEL:
-                    # このモデルは諦めて次の候補へ
-                    break
+                    break  # このモデルは諦めて次の候補へ
                 wait = min(MAX_WAIT_SEC, BASE_WAIT_SEC * (2 ** (attempt - 1))) + random.uniform(0, 3)
-                wait_with_message(status, wait, f"{model} が混雑しています（エラー{e.code}）")
+                wait_with_message(ph, 2, wait, f"{model} が混雑しています（エラー{e.code}）")
     if last_error is not None:
         raise last_error
     raise RuntimeError("利用可能なモデルが見つかりませんでした。")
 
 
 # =========================================================
-# ここから下は元の画面構成のまま
+# 出力の整形（画面表示・Word）
+# =========================================================
+SECTION_RE = re.compile(r'^[\s#>*]*■\s*([123])\s*[\.．、]', re.M)
+SECTION_NAMES = {"1": "議事録", "2": "企画案A", "3": "企画案B"}
+
+
+def split_sections(text):
+    """「■ 1.」「■ 2.」「■ 3.」の見出しで分割する。見つからなければ全文1枚"""
+    matches = list(SECTION_RE.finditer(text))
+    if len(matches) < 2:
+        return [("全文", text)]
+    sections = []
+    for i, m in enumerate(matches):
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        sections.append((SECTION_NAMES.get(m.group(1), f"項目{m.group(1)}"), text[m.start():end].strip()))
+    sections.append(("全文", text))
+    return sections
+
+
+def to_display_md(body):
+    """画面表示用：■見出しを見出し化し、単独改行が潰れないようにする"""
+    out = []
+    for line in body.splitlines():
+        s = line.strip()
+        if re.match(r'^[#*\s]*■', s):
+            out.append("### " + re.sub(r'^[#*\s]*', '', s).replace("**", ""))
+        elif s == "":
+            out.append("")
+        elif s.startswith("|"):
+            out.append(line)
+        else:
+            out.append(line.rstrip() + "  ")
+    return "\n".join(out)
+
+
+def _set_font(style, size=None, bold=None, color=None):
+    style.font.name = "Yu Gothic"
+    rpr = style.element.get_or_add_rPr()
+    rfonts = rpr.find(qn('w:rFonts'))
+    if rfonts is None:
+        rfonts = rpr.makeelement(qn('w:rFonts'), {})
+        rpr.append(rfonts)
+    rfonts.set(qn('w:eastAsia'), "游ゴシック")
+    rfonts.set(qn('w:ascii'), "Yu Gothic")
+    rfonts.set(qn('w:hAnsi'), "Yu Gothic")
+    if size:
+        style.font.size = Pt(size)
+    if bold is not None:
+        style.font.bold = bold
+    if color:
+        style.font.color.rgb = color
+
+
+def _add_runs(paragraph, text):
+    """**太字** を反映して文字を入れる"""
+    for i, chunk in enumerate(re.split(r'\*\*', text)):
+        if chunk:
+            run = paragraph.add_run(chunk.replace("*", "") if i % 2 == 0 else chunk)
+            run.bold = (i % 2 == 1)
+
+
+def build_docx(text, title, meta):
+    doc = Document()
+    navy = RGBColor(0x1E, 0x29, 0x3B)
+    _set_font(doc.styles["Normal"], size=10.5)
+    _set_font(doc.styles["Title"], size=20, bold=True, color=navy)
+    for lv, size in ((1, 15), (2, 13), (3, 11.5)):
+        _set_font(doc.styles[f"Heading {lv}"], size=size, bold=True, color=navy)
+    for name in ("List Bullet", "List Bullet 2"):
+        _set_font(doc.styles[name], size=10.5)
+
+    doc.add_paragraph(title, style="Title")
+    p = doc.add_paragraph()
+    r = p.add_run(meta)
+    r.font.size = Pt(9)
+    r.font.color.rgb = RGBColor(0x64, 0x74, 0x8B)
+
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        raw = lines[i]
+        s = raw.strip()
+        i += 1
+        if not s or re.fullmatch(r'[-*_]{3,}', s):
+            continue
+        # 表（| a | b |）
+        if s.startswith("|"):
+            rows = [s]
+            while i < len(lines) and lines[i].strip().startswith("|"):
+                rows.append(lines[i].strip())
+                i += 1
+            cells = [[c.strip() for c in r.strip("|").split("|")] for r in rows
+                     if not re.fullmatch(r'\|?[\s:\-|]+\|?', r)]
+            if cells:
+                ncol = max(len(c) for c in cells)
+                table = doc.add_table(rows=len(cells), cols=ncol)
+                table.style = "Table Grid"
+                for ri, row in enumerate(cells):
+                    for ci in range(ncol):
+                        cell_p = table.cell(ri, ci).paragraphs[0]
+                        _add_runs(cell_p, row[ci] if ci < len(row) else "")
+                        if ri == 0:
+                            for run in cell_p.runs:
+                                run.bold = True
+            continue
+        m = re.match(r'^(#{1,6})\s+(.*)', s)
+        if m:
+            body = m.group(2).replace("**", "")
+            level = 1 if body.startswith("■") else min(len(m.group(1)), 3)
+            doc.add_heading(body, level=level)
+            continue
+        if re.match(r'^\**■', s):
+            doc.add_heading(s.replace("**", ""), level=1)
+            continue
+        indent = len(raw) - len(raw.lstrip())
+        bm = re.match(r'^(?:[-*•]\s+|・)(.*)', s)
+        if bm:
+            style = "List Bullet 2" if indent >= 2 else "List Bullet"
+            _add_runs(doc.add_paragraph(style=style), bm.group(1))
+            continue
+        _add_runs(doc.add_paragraph(), s)
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+# =========================================================
+# 画面
 # =========================================================
 query_params = st.query_params
 is_admin = False
@@ -112,7 +423,7 @@ if "admin" in query_params:
 if "title_val" not in st.session_state:
     st.session_state["title_val"] = "Kobunsha BIZ-CREA"
 if "desc_val" not in st.session_state:
-    st.session_state["desc_val"] = "1時間以上の長大な会議音声にも対応。会議や打ち合わせの議事録と新事業の企画案ドラフトを出力します。"
+    st.session_state["desc_val"] = "会議音声から、議事録と新事業の企画案ドラフトを生成します。1時間を超える音声にも対応しています。"
 if "pre_val" not in st.session_state:
     st.session_state["pre_val"] = "・現在の出版業界は非常に厳しい。既存の「紙」や、失敗に終わった消耗戦のコタツ記事デジタルから完全に脱却する。\n・紙、デジタルにとらわれず、イベント、スクールビジネス、終活ビジネス等々の「光文社が手がけなかった」新規事業を生み出す。\n・既存雑誌・書籍と一切関係ないK-POP関係の出版物、グッズ販売、イベント等を行ってきた。\n・フィジカルか、AIか、動画か、SNSかを問わず、新たなビジネスイメージを作りたい。\n・もちろん、書籍やIPといった出版社の事業も大切。\n・ただし「出版社がやるビジネス」のイメージを守る。ラーメン屋やキャバクラを経営してどうする？\n・海外の最新事例の構造も参照すること。"
 if "target_val" not in st.session_state:
@@ -129,36 +440,40 @@ def sync_ng(): st.session_state["ng_val"] = st.session_state["k5"]
 if is_admin:
     left_col, right_col = st.columns(2, gap="large")
 else:
-    left_spacer, center_box, right_spacer = st.columns(3)
-    right_col = center_box
+    _, right_col, _ = st.columns([1, 2.2, 1])
 
 if is_admin:
     with left_col:
-        st.markdown("### 🛠️ 【管理者専用】サイト文言・前提条件の自由編集")
-        st.text_input("⚙️ システムのメインタイトル", value=st.session_state["title_val"], key="k1", on_change=sync_title)
-        st.text_area("⚙️ システムの説明文", value=st.session_state["desc_val"], key="k2", height=70, on_change=sync_desc)
-        st.markdown("---")
-        st.markdown("### 🎯 戦略文脈（プロンプト）の書き換え")
-        st.text_area("■ 前提条件", value=st.session_state["pre_val"], key="k3", height=220, on_change=sync_pre)
-        st.text_area("■ 狙うべきターゲット層", value=st.session_state["target_val"], key="k4", height=100, on_change=sync_target)
-        st.text_area("■ 排除すべきNG項目", value=st.session_state["ng_val"], key="k5", height=100, on_change=sync_ng)
-        st.markdown("---")
+        st.markdown('<div class="bc-admin">ADMIN</div>', unsafe_allow_html=True)
+        st.markdown("#### サイト文言・前提条件の編集")
+        st.text_input("システムのメインタイトル", value=st.session_state["title_val"], key="k1", on_change=sync_title)
+        st.text_area("システムの説明文", value=st.session_state["desc_val"], key="k2", height=70, on_change=sync_desc)
+        st.markdown('<div class="bc-label">戦略文脈（プロンプト）</div>', unsafe_allow_html=True)
+        st.text_area("前提条件", value=st.session_state["pre_val"], key="k3", height=220, on_change=sync_pre)
+        st.text_area("狙うべきターゲット層", value=st.session_state["target_val"], key="k4", height=100, on_change=sync_target)
+        st.text_area("排除すべきNG項目", value=st.session_state["ng_val"], key="k5", height=100, on_change=sync_ng)
 
 with right_col:
     st.markdown(f"""
-    <div style="background-color: #1E293B; padding: 25px; border-radius: 10px; margin-bottom: 25px; border: 1px solid #334155;">
-        <h1 style="color: #F8FAFC; margin: 0; font-size: 42px; font-weight: 700;">{st.session_state["title_val"]}</h1>
-        <p style="color: #94A3B8; margin-top: 14px; margin-bottom: 0; font-size: 14px; line-height: 1.6;">{st.session_state["desc_val"]}</p>
+    <div class="bc-header">
+        <p class="bc-kicker">KOBUNSHA BUSINESS CREATION</p>
+        <div class="bc-title">{html.escape(st.session_state["title_val"])}</div>
+        <p class="bc-desc">{html.escape(st.session_state["desc_val"])}</p>
     </div>
     """, unsafe_allow_html=True)
 
-    uploaded_file = st.file_uploader("会議の録音ファイル（音声）をここにドラッグ＆ドロップしてください", type=["mp3", "m4a", "wav"], label_visibility="collapsed")
+    st.markdown('<div class="bc-label">会議の録音ファイル（MP3 / M4A / WAV）</div>', unsafe_allow_html=True)
+    uploaded_file = st.file_uploader("会議の録音ファイル", type=["mp3", "m4a", "wav"], label_visibility="collapsed")
 
     if uploaded_file:
-        st.markdown(f"**🟢 検知:** `{uploaded_file.name}` ({uploaded_file.size/1024/1024:.2f} MB)")
+        st.markdown(
+            f'<div class="bc-file">{html.escape(uploaded_file.name)}<span>{uploaded_file.size/1024/1024:.1f} MB</span></div>',
+            unsafe_allow_html=True,
+        )
 
-        if st.button("議事録・新事業企画案の自動生成を開始", type="primary", use_container_width=True):
-            status_placeholder = st.empty()
+        if st.button("議事録と企画案を生成する", type="primary", use_container_width=True):
+            st.session_state.pop("result", None)
+            progress_ph = st.empty()
 
             api_key = os.environ.get("GEMINI_API_KEY")
             if not api_key:
@@ -181,8 +496,8 @@ with right_col:
                 mime_type = mime_map.get(ext, 'audio/mp3')
 
                 # 音声は1回だけアップロードし、再試行ではこれを使い回す
-                audio_file_ref = upload_with_retry(client, temp_path, mime_type, status_placeholder)
-                audio_file_ref = wait_until_active(client, audio_file_ref, status_placeholder)
+                audio_file_ref = upload_with_retry(client, temp_path, mime_type, progress_ph)
+                audio_file_ref = wait_until_active(client, audio_file_ref, progress_ph)
 
                 prompt = f"""
                 あなたは光文社ビジネスクリエーション部のディレクターとして、高度な論理的知性を持って冷徹に会話を分析する専門家です。
@@ -203,30 +518,27 @@ with right_col:
                 ■ 3. 企画案B（同上）
                 """
 
-                output_text, used_model = generate_with_retry(client, [audio_file_ref, prompt], status_placeholder)
+                output_text, used_model = generate_with_retry(client, [audio_file_ref, prompt], progress_ph)
 
-                status_placeholder.empty()
-                st.success(f"✅ 解析が完了しました（使用モデル: {used_model}）。成果物(TXT)をダウンロードしてください。")
-
-                st.download_button(
-                    label="📥 成果物(TXT)をダウンロードする",
-                    data=output_text,
-                    file_name="光文社ビジクリ部_議事録_企画案.txt",
-                    mime="text/plain",
-                    use_container_width=True
-                )
-
-                st.markdown("### 🎯 成果物プレビュー")
-                st.text(output_text)
+                now = datetime.now(JST)
+                meta = f"生成日時 {now:%Y年%m月%d日 %H:%M}　／　音声 {uploaded_file.name}　／　モデル {used_model}"
+                st.session_state["result"] = {
+                    "text": output_text,
+                    "model": used_model,
+                    "meta": meta,
+                    "base": f"光文社ビジクリ部_議事録_企画案_{now:%Y%m%d_%H%M}",
+                    "docx": build_docx(output_text, "議事録・新事業企画案", meta),
+                }
+                render_progress(progress_ph, 3, "完了しました。")
 
             except genai_errors.APIError as e:
-                status_placeholder.empty()
+                progress_ph.empty()
                 if e.code in RETRYABLE_CODES:
                     st.error(f"Geminiの混雑が続いており、全モデルで再試行しましたが完了できませんでした（エラー{e.code}）。時間をおいて再実行してください。")
                 else:
                     st.error(f"Geminiでエラーが発生しました（エラー{e.code}）: {e}")
             except Exception as e:
-                status_placeholder.empty()
+                progress_ph.empty()
                 st.error(f"エラーが発生しました: {e}")
             finally:
                 # 成功・失敗にかかわらず、Gemini側とサーバー側の音声を必ず削除
@@ -237,3 +549,37 @@ with right_col:
                         pass
                 if temp_path and os.path.exists(temp_path):
                     os.remove(temp_path)
+
+    # 結果はセッションに保持する（ダウンロードボタンを押しても消えない）
+    result = st.session_state.get("result")
+    if result:
+        st.markdown(
+            f'<div class="bc-result-head"><div class="bc-rh-title">生成結果</div><span>{html.escape(result["meta"])}</span></div>',
+            unsafe_allow_html=True,
+        )
+        c1, c2 = st.columns(2)
+        with c1:
+            st.download_button(
+                "TXTでダウンロード",
+                data=result["text"],
+                file_name=result["base"] + ".txt",
+                mime="text/plain",
+                use_container_width=True,
+                key="dl_txt",
+            )
+        with c2:
+            st.download_button(
+                "Wordでダウンロード",
+                data=result["docx"],
+                file_name=result["base"] + ".docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                type="primary",
+                use_container_width=True,
+                key="dl_docx",
+            )
+
+        sections = split_sections(result["text"])
+        tabs = st.tabs([name for name, _ in sections])
+        for tab, (name, body) in zip(tabs, sections):
+            with tab:
+                st.markdown(to_display_md(body))
