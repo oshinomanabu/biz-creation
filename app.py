@@ -28,7 +28,8 @@ MODEL_CANDIDATES = [
     "gemini-3.1-flash-lite",
     "gemini-2.5-flash",
 ]
-RETRYABLE_CODES = {429, 500, 503, 504}   # 混雑・一時障害とみなして再試行するコード
+RETRYABLE_CODES = {500, 503, 504}        # 混雑・一時障害とみなして再試行するコード
+QUOTA_CODE = 429                         # 無料枠の上限。待っても回復しないので再試行しない
 MAX_ATTEMPTS_PER_MODEL = 5               # 1モデルあたりの試行回数
 BASE_WAIT_SEC = 10                       # 初回の待ち時間（以後倍々）
 MAX_WAIT_SEC = 120                       # 1回の待ち時間の上限
@@ -254,9 +255,15 @@ def wait_until_active(client, file_ref, ph):
     return file_ref
 
 
+class QuotaExceeded(Exception):
+    """全モデルで無料枠の上限(429)に達した"""
+
+
 def generate_with_retry(client, contents, ph):
-    """候補モデルを順に試し、混雑時は指数バックオフで再試行する"""
+    """候補モデルを順に試し、混雑時は指数バックオフで再試行する。
+    429(上限)はモデルごとの枠なので、待たずに次のモデルへ移る"""
     last_error = None
+    quota_hit = False
     for model in MODEL_CANDIDATES:
         for attempt in range(1, MAX_ATTEMPTS_PER_MODEL + 1):
             try:
@@ -269,12 +276,19 @@ def generate_with_retry(client, contents, ph):
                 last_error = e
                 if e.code == 404:
                     break  # このモデル名は存在しない → 待たずに次の候補へ
+                if e.code == QUOTA_CODE:
+                    quota_hit = True
+                    render_progress(ph, 2, f"{model} は無料枠の上限に達しています。次のモデルに切り替えます…", waiting=True)
+                    time.sleep(2)
+                    break  # 上限はモデルごと → 待たずに次の候補へ
                 if e.code not in RETRYABLE_CODES:
                     raise  # 再試行しても直らないエラー
                 if attempt == MAX_ATTEMPTS_PER_MODEL:
                     break  # このモデルは諦めて次の候補へ
                 wait = min(MAX_WAIT_SEC, BASE_WAIT_SEC * (2 ** (attempt - 1))) + random.uniform(0, 3)
                 wait_with_message(ph, 2, wait, f"{model} が混雑しています（エラー{e.code}）")
+    if quota_hit and (last_error is None or last_error.code in (QUOTA_CODE, 404)):
+        raise QuotaExceeded()
     if last_error is not None:
         raise last_error
     raise RuntimeError("利用可能なモデルが見つかりませんでした。")
@@ -576,9 +590,14 @@ with right_col:
                 }
                 render_progress(progress_ph, 3, "完了しました。")
 
+            except QuotaExceeded:
+                progress_ph.empty()
+                st.error("Geminiの無料枠の上限に達しました（全モデル）。1分あたりの上限であれば数分で回復します。数分おいても同じ表示が出る場合は1日の上限です。日本時間の夕方（16〜17時）以降に再度お試しください。")
             except genai_errors.APIError as e:
                 progress_ph.empty()
-                if e.code in RETRYABLE_CODES:
+                if e.code == QUOTA_CODE:
+                    st.error("Geminiの無料枠の上限に達しました。日本時間の夕方（16〜17時）以降に再度お試しください。")
+                elif e.code in RETRYABLE_CODES:
                     st.error(f"Geminiの混雑が続いており、全モデルで再試行しましたが完了できませんでした（エラー{e.code}）。時間をおいて再実行してください。")
                 else:
                     st.error(f"Geminiでエラーが発生しました（エラー{e.code}）: {e}")
