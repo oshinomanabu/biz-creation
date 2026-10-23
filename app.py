@@ -9,6 +9,7 @@ import tempfile
 from datetime import datetime, timezone, timedelta
 from google import genai
 from google.genai import errors as genai_errors
+from google.genai import types as genai_types
 from docx import Document
 from docx.shared import Pt, RGBColor
 from docx.oxml.ns import qn
@@ -23,6 +24,7 @@ JST = timezone(timedelta(hours=9))
 # 上から順に試す。存在しないモデル(404)は自動で飛ばす。
 MODEL_CANDIDATES = [
     "gemini-3.6-flash",          # メイン（社内で利用可能と確認済み）
+    "gemini-3.8-flash",          # 公式ドキュメント記載の新モデル（使えない環境では自動で飛ばす）
     "gemini-3.6-flash-preview",  # 正式名に -preview が付く場合の保険
     "gemini-3.5-flash",          # 以下、混雑時の代替（存在しなければ自動で飛ばす）
     "gemini-3.1-flash-lite",
@@ -187,11 +189,11 @@ footer { visibility: hidden; }
 # =========================================================
 # 進行表示
 # =========================================================
-STEPS = ["音声を転送", "音声を準備", "Geminiで解析"]
+STEPS = ["音声を転送", "音声を準備", "Geminiで解析", "海外事例を検索"]
 
 
 def render_progress(ph, step, message, waiting=False):
-    """step: 0〜2 = 実行中の段, 3 = 全段完了"""
+    """step: 0〜3 = 実行中の段, len(STEPS) = 全段完了"""
     parts = []
     for i, name in enumerate(STEPS):
         if i < step:
@@ -256,10 +258,10 @@ def wait_until_active(client, file_ref, ph):
 
 
 class QuotaExceeded(Exception):
-    """全モデルで無料枠の上限(429)に達した"""
+    """全モデルで利用上限(429)に達した"""
 
 
-def generate_with_retry(client, contents, ph):
+def generate_with_retry(client, contents, ph, config=None, step=2, label="解析"):
     """候補モデルを順に試し、混雑時は指数バックオフで再試行する。
     429(上限)はモデルごとの枠なので、待たずに次のモデルへ移る"""
     last_error = None
@@ -267,8 +269,12 @@ def generate_with_retry(client, contents, ph):
     for model in MODEL_CANDIDATES:
         for attempt in range(1, MAX_ATTEMPTS_PER_MODEL + 1):
             try:
-                render_progress(ph, 2, f"{model} で解析しています…（{attempt}/{MAX_ATTEMPTS_PER_MODEL}回目）。1時間の音声で1〜3分ほどかかります。")
-                response = client.models.generate_content(model=model, contents=contents)
+                if step == 2:
+                    msg = f"{model} で解析しています…（{attempt}/{MAX_ATTEMPTS_PER_MODEL}回目）。1時間の音声で1〜3分ほどかかります。"
+                else:
+                    msg = f"{model} で{label}しています…（{attempt}/{MAX_ATTEMPTS_PER_MODEL}回目）"
+                render_progress(ph, step, msg)
+                response = client.models.generate_content(model=model, contents=contents, config=config)
                 if not response.text:
                     raise RuntimeError("Geminiから空の応答が返りました。")
                 return response.text, model
@@ -278,7 +284,7 @@ def generate_with_retry(client, contents, ph):
                     break  # このモデル名は存在しない → 待たずに次の候補へ
                 if e.code == QUOTA_CODE:
                     quota_hit = True
-                    render_progress(ph, 2, f"{model} は無料枠の上限に達しています。次のモデルに切り替えます…", waiting=True)
+                    render_progress(ph, step, f"{model} は利用上限に達しています。次のモデルに切り替えます…", waiting=True)
                     time.sleep(2)
                     break  # 上限はモデルごと → 待たずに次の候補へ
                 if e.code not in RETRYABLE_CODES:
@@ -286,12 +292,70 @@ def generate_with_retry(client, contents, ph):
                 if attempt == MAX_ATTEMPTS_PER_MODEL:
                     break  # このモデルは諦めて次の候補へ
                 wait = min(MAX_WAIT_SEC, BASE_WAIT_SEC * (2 ** (attempt - 1))) + random.uniform(0, 3)
-                wait_with_message(ph, 2, wait, f"{model} が混雑しています（エラー{e.code}）")
+                wait_with_message(ph, step, wait, f"{model} が混雑しています（エラー{e.code}）")
     if quota_hit and (last_error is None or last_error.code in (QUOTA_CODE, 404)):
         raise QuotaExceeded()
     if last_error is not None:
         raise last_error
     raise RuntimeError("利用可能なモデルが見つかりませんでした。")
+
+
+# =========================================================
+# 海外事例の検索（2回目の呼び出し。議事録には検索を一切使わない）
+# =========================================================
+EXAMPLE_MARK = "[[EXAMPLE]]"
+EXAMPLE_NONE = "確実な該当事例なし"
+
+
+def fill_examples_with_search(client, text, ph):
+    """1回目の出力にある [[EXAMPLE]] を、Google検索で実在を確認した事例で埋める。
+    失敗しても全体は止めず、「確実な該当事例なし」で埋めて返す"""
+    n = text.count(EXAMPLE_MARK)
+    if n == 0:
+        return text
+    # 番号付きの目印に置き換える
+    numbered = text
+    for i in range(1, n + 1):
+        numbered = numbered.replace(EXAMPLE_MARK, f"[[EXAMPLE_{i}]]", 1)
+
+    # 企画案の部分（■2以降）だけを渡す。議事録は渡さない
+    m = re.search(r'^[\s#>*]*■\s*2\s*[\.．、]', numbered, re.M)
+    proposals = numbered[m.start():] if m else numbered
+
+    search_prompt = f"""
+以下は新規事業の企画案です。本文中の [[EXAMPLE_1]]〜[[EXAMPLE_{n}]] の位置に入れる「参照すべき海外最新事例」を、
+Google検索で実在を確認したうえで、各1つずつ挙げてください。
+
+【ルール】
+・Google検索で実在を確認できた企業・サービス・事業・イベントだけを書く。検索で確認できないものは絶対に書かない。
+・事例名・企業名・サービス名を創作しない。確認できなければ「{EXAMPLE_NONE}」と書く。
+・できるだけ直近数年の事例を選ぶ。企画案の核心アイデアと構造が似ているものを選ぶ。
+・日本語で書く。事例名は原語表記のままでよい。
+・出力は次の{n}行だけ。前置き・説明・出典の列挙は書かない。
+
+EXAMPLE_1：事例名（国）── 何をしている事例か、企画案とどう似ているかを1文で
+（以下、EXAMPLE_{n}まで同じ形式）
+
+【企画案】
+{proposals}
+"""
+    config = genai_types.GenerateContentConfig(
+        tools=[genai_types.Tool(google_search=genai_types.GoogleSearch())]
+    )
+    found = {}
+    try:
+        result, _ = generate_with_retry(client, [search_prompt], ph, config=config, step=3, label="海外事例を検索")
+        for line in result.splitlines():
+            mm = re.match(r'^\s*[\-・*]*\s*\[*EXAMPLE_(\d+)\]*\s*[:：]\s*(.+)$', line.strip())
+            if mm:
+                found[int(mm.group(1))] = mm.group(2).strip()
+    except Exception:
+        pass  # 検索に失敗しても議事録・企画案は返す
+
+    out = numbered
+    for i in range(1, n + 1):
+        out = out.replace(f"[[EXAMPLE_{i}]]", found.get(i) or EXAMPLE_NONE)
+    return out
 
 
 # =========================================================
@@ -536,7 +600,7 @@ with right_col:
                 ・4案はすべて、この会議で話された議題・発言を起点に発想すること。会議で話されていない領域の案は出さない。
                 ・前提条件・ターゲット層・NGは、会議を起点にした発想を光文社の事業としてどう形にするかの方向づけにだけ使う。前提条件に例として挙がっている領域（K-POP、終活など）を、会議の内容と無関係に持ち込まない。
                 ・4案のテーマ・事業領域を互いに重複させない。
-                ・「参照すべき海外最新事例」には、実在することに確信がある企業・サービス・事例だけを書く。事例名・企業名・サービス名を創作することは絶対に禁止。少しでも実在に確信が持てない場合は、何も書かずに「確実な該当事例なし」と書くこと。もっともらしい架空の事例を書くより、空欄のほうが価値がある。
+                ・「参照すべき海外最新事例」の欄には、事例を書かず、必ず「[[EXAMPLE]]」とだけ書くこと（事例は後の工程で別途、検索して記入する）。
 
                 ■ 前提条件（企画案のみに適用）：
                 {st.session_state["pre_val"]}
@@ -583,6 +647,9 @@ with right_col:
 
                 output_text, used_model = generate_with_retry(client, [audio_file_ref, prompt], progress_ph)
 
+                # 2回目：海外事例だけを検索付きで埋める（音声・議事録は渡さない）
+                output_text = fill_examples_with_search(client, output_text, progress_ph)
+
                 now = datetime.now(JST)
                 meta = f"生成日時 {now:%Y年%m月%d日 %H:%M}　／　音声 {uploaded_file.name}　／　モデル {used_model}"
                 st.session_state["result"] = {
@@ -592,15 +659,17 @@ with right_col:
                     "base": f"光文社ビジクリ部_議事録_企画案_{now:%Y%m%d_%H%M}",
                     "docx": build_docx(output_text, "議事録・新事業企画案", meta),
                 }
-                render_progress(progress_ph, 3, "完了しました。")
+                render_progress(progress_ph, len(STEPS), "完了しました。")
 
             except QuotaExceeded:
                 progress_ph.empty()
-                st.error("Geminiの無料枠の上限に達しました（全モデル）。1分あたりの上限であれば数分で回復します。数分おいても同じ表示が出る場合は1日の上限です。日本時間の夕方（16〜17時）以降に再度お試しください。")
+                st.error("Geminiの利用上限に達しました（全モデル）。1分あたりの上限であれば数分で回復します。数分おいても同じ表示が出る場合は、前払いの残高切れや1日の上限の可能性があります。AI Studioの「課金」画面で残高を確認してください。")
             except genai_errors.APIError as e:
                 progress_ph.empty()
-                if e.code == QUOTA_CODE:
-                    st.error("Geminiの無料枠の上限に達しました。日本時間の夕方（16〜17時）以降に再度お試しください。")
+                if e.code == 402:
+                    st.error("Geminiの前払い残高がなくなりました。AI Studioの「課金」画面でクレジットを追加してください。")
+                elif e.code == QUOTA_CODE:
+                    st.error("Geminiの利用上限に達しました。数分おいて再度お試しください。続く場合はAI Studioの「課金」画面で残高を確認してください。")
                 elif e.code in RETRYABLE_CODES:
                     st.error(f"Geminiの混雑が続いており、全モデルで再試行しましたが完了できませんでした（エラー{e.code}）。時間をおいて再実行してください。")
                 else:
